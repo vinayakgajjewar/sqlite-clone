@@ -4,7 +4,30 @@
 #include <string.h>
 #include <stdint.h>
 
-#define size_of_attribute(Struct, Attribute) sizeof(((Struct *) 0)->Attribute)
+/*
+ * A wrapper around the state we need to interact with getline().
+ */
+typedef struct {
+    char *buffer;
+    size_t buffer_length;
+    ssize_t input_length;
+} InputBuffer;
+
+typedef enum {
+    EXECUTE_SUCCESS, EXECUTE_TABLE_FULL
+} ExecuteResult;
+
+typedef enum {
+    META_COMMAND_SUCCESS, META_COMMAND_UNRECOGNIZED_COMMAND
+} MetaCommandResult;
+
+typedef enum {
+    PREPARE_SUCCESS, PREPARE_SYNTAX_ERROR, PREPARE_UNRECOGNIZED_STATEMENT
+} PrepareResult;
+
+typedef enum {
+    STATEMENT_INSERT, STATEMENT_SELECT
+} StatementType;
 
 #define COLUMN_USERNAME_SIZE 32
 #define COLUMN_EMAIL_SIZE 255
@@ -23,6 +46,7 @@ typedef struct {
  * email        255             36
  * total        291
  */
+#define size_of_attribute(Struct, Attribute) sizeof(((Struct *) 0)->Attribute)
 const uint32_t ID_SIZE = size_of_attribute(Row, id);
 const uint32_t USERNAME_SIZE = size_of_attribute(Row, username);
 const uint32_t EMAIL_SIZE = size_of_attribute(Row, email);
@@ -49,12 +73,16 @@ typedef struct {
     void *pages[TABLE_MAX_PAGES];
 } Table;
 
+void print_row(Row *row) {
+    printf("(%d, %s, %s)\n", row->id, row->username, row->email);
+}
+
 /*
  * Convert a row into its compact representation.
  */
 void serialize_row(Row *source, void *destination) {
     memcpy(destination + ID_OFFSET, &(source->id), ID_SIZE);
-    memcpy(destination + USERNAME_OFFSET, &(source->username), USERNAME_OFFSET);
+    memcpy(destination + USERNAME_OFFSET, &(source->username), USERNAME_SIZE);
     memcpy(destination + EMAIL_OFFSET, &(source->email), EMAIL_SIZE);
 }
 
@@ -81,35 +109,6 @@ void *row_slot(Table *table, uint32_t row_num) {
     uint32_t byte_offset = row_offset * ROW_SIZE;
     return page + byte_offset;
 }
-
-void print_row(Row *row) {
-    printf("(%d, %s, %s)\n", row->id, row->username, row->email);
-}
-
-/*
- * A wrapper around the state we need to interact with getline().
- */
-typedef struct {
-    char *buffer;
-    size_t buffer_length;
-    ssize_t input_length;
-} InputBuffer;
-
-typedef enum {
-    EXECUTE_SUCCESS, EXECUTE_TABLE_FULL
-} ExecuteResult;
-
-typedef enum {
-    META_COMMAND_SUCCESS, META_COMMAND_UNRECOGNIZED_COMMAND
-} MetaCommandResult;
-
-typedef enum {
-    PREPARE_SUCCESS, PREPARE_SYNTAX_ERROR, PREPARE_UNRECOGNIZED_STATEMENT
-} PrepareResult;
-
-typedef enum {
-    STATEMENT_INSERT, STATEMENT_SELECT
-} StatementType;
 
 typedef struct {
     StatementType type;
@@ -154,6 +153,7 @@ PrepareResult prepare_statement(InputBuffer *input_buffer, Statement *statement)
          */
         int args_assigned = sscanf(input_buffer->buffer, "insert %d %s %s", &(statement->row_to_insert.id),
                                    statement->row_to_insert.username, statement->row_to_insert.email);
+
         if (args_assigned < 3) {
             return PREPARE_SYNTAX_ERROR;
         }
